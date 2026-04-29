@@ -7,10 +7,11 @@ import (
 )
 
 func startCron() {
-	// Goroutine 1: fetch weather + check risk every 10 minutes
+	// Goroutine 1: fetch weather + AQI + check risk every 10 minutes
 	go func() {
 		for {
 			fetchWeather()
+			fetchAQI()
 			checkRisk()
 			time.Sleep(10 * time.Minute)
 		}
@@ -39,6 +40,13 @@ func startCron() {
 			err = db.QueryRow(`SELECT risk_level FROM alerts ORDER BY id DESC LIMIT 1`).Scan(&risk)
 			if err == sql.ErrNoRows {
 				risk = "LOW"
+			}
+
+			aqi := fetchAQI()
+			if aqi != nil {
+				sendAQIReport(aqi)
+			} else {
+				log.Println("Periodic AQI report skipped: could not fetch AQI")
 			}
 
 			sendPeriodicReport(report, risk)

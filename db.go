@@ -48,6 +48,15 @@ func initDB() {
 			risk_level       TEXT,
 			message          TEXT
 		)`,
+		`CREATE TABLE IF NOT EXISTS aqi_data (
+			id        INTEGER PRIMARY KEY AUTOINCREMENT,
+			timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+			city      TEXT,
+			aqi       INTEGER,
+			aqi_text  TEXT,
+			pm25      REAL,
+			pm10      REAL
+		)`,
 	}
 
 	for _, stmt := range statements {

@@ -133,6 +133,100 @@ func sendAllClear() {
 	log.Println("All Clear sent to Discord")
 }
 
+func sendAQIReport(aqi *aqiResponse) {
+	c := aqi.CurrentAQI
+
+	color := colorGreen
+	title := "🌫️ Air Quality Report — GOOD"
+	switch {
+	case c.AQI > 100:
+		color = colorRed
+		title = "🌫️ Air Quality Report — UNHEALTHY"
+	case c.AQI > 50:
+		color = colorYellow
+		title = "🌫️ Air Quality Report — MODERATE"
+	}
+
+	// Derive "today" from the WAQI response timestamp (station's local timezone),
+	// not time.Now(), to avoid a server UTC vs. station UTC+7 mismatch.
+	aqiDateStr := c.Time
+	if len(aqiDateStr) >= 10 {
+		aqiDateStr = aqiDateStr[:10]
+	}
+	todayT, err := time.Parse("2006-01-02", aqiDateStr)
+	if err != nil {
+		todayT = time.Now()
+	}
+	today := todayT.Format("2006-01-02")
+	yesterday := todayT.AddDate(0, 0, -1).Format("2006-01-02")
+	tomorrow := todayT.AddDate(0, 0, 1).Format("2006-01-02")
+
+	findPM10 := func(day string) *PM10Detail {
+		for i := range aqi.DailyAQI.PM10 {
+			if aqi.DailyAQI.PM10[i].Day == day {
+				return &aqi.DailyAQI.PM10[i]
+			}
+		}
+		return nil
+	}
+	findPM25 := func(day string) *PM25Detail {
+		for i := range aqi.DailyAQI.PM25 {
+			if aqi.DailyAQI.PM25[i].Day == day {
+				return &aqi.DailyAQI.PM25[i]
+			}
+		}
+		return nil
+	}
+	fmtPM10 := func(d *PM10Detail) string {
+		if d == nil {
+			return "—"
+		}
+		return fmt.Sprintf("⬇️ %d   ↔️ %d   ⬆️ %d", d.Min, d.Avg, d.Max)
+	}
+	fmtPM25 := func(d *PM25Detail) string {
+		if d == nil {
+			return "—"
+		}
+		return fmt.Sprintf("⬇️ %d   ↔️ %d   ⬆️ %d", d.Min, d.Avg, d.Max)
+	}
+
+	embed := discordEmbed{
+		Title: title,
+		Color: color,
+		Fields: []embedField{
+			{
+				Name: "📍 City / Time",
+				Value: fmt.Sprintf("%s\n🕐 %s",
+					c.City, shortTime(c.Time),
+				),
+				Inline: false,
+			},
+			{
+				Name: "📊 Now",
+				Value: fmt.Sprintf(
+					"💨 PM10:   %.1f μg/m³\n🌫️ PM2.5:   %.1f μg/m³\nAQI: %d — %s",
+					c.PM10, c.PM25, c.AQI, aqiCodeText(c.AQI),
+				),
+				Inline: false,
+			},
+			{
+				Name: "📅 Daily Forecast",
+				Value: fmt.Sprintf(
+					"💨 PM10\n  ⏪ Yesterday   %s\n  📍 Today       %s\n  🔮 Tomorrow    %s\n\n🌫️ PM2.5\n  ⏪ Yesterday   %s\n  📍 Today       %s\n  🔮 Tomorrow    %s",
+					fmtPM10(findPM10(yesterday)), fmtPM10(findPM10(today)), fmtPM10(findPM10(tomorrow)),
+					fmtPM25(findPM25(yesterday)), fmtPM25(findPM25(today)), fmtPM25(findPM25(tomorrow)),
+				),
+				Inline: false,
+			},
+		},
+		Footer:    &embedFooter{Text: "Mae Sai AQI — updated every 3 hours"},
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+	}
+
+	sendDiscord(discordPayload{Embeds: []discordEmbed{embed}})
+	log.Println("AQI report sent to Discord")
+}
+
 func sendPeriodicReport(report *WeatherReport, risk string) {
 	color := colorGreen
 	title := "📊 Weather Report — LOW"
