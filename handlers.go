@@ -97,3 +97,46 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Write([]byte(`{"status":"ok"}`))
 }
+
+func testPeroidWeatherHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var weather WeatherData
+	err := db.QueryRow(
+		`SELECT temperature, humidity, rain_probability, rainfall, wind_speed, wind_direction
+		 FROM weather_data ORDER BY id DESC LIMIT 1`,
+	).Scan(&weather.Temperature, &weather.Humidity, &weather.RainProbability, &weather.Rainfall, &weather.WindSpeed, &weather.WindDirection)
+	if err == sql.ErrNoRows {
+		http.Error(w, "No weather data yet", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+
+	var s SensorData
+	err = db.QueryRow(
+		`SELECT sensor_location, humidity, temperature, water_detected
+		 FROM sensor_data ORDER BY id DESC LIMIT 1`,
+	).Scan(&s.Location, &s.Humidity, &s.Temperature, &s.WaterDetected)
+	if err == sql.ErrNoRows {
+		s.Location = "weather-api"
+		s.Humidity = weather.Humidity
+		s.Temperature = weather.Temperature
+	}
+
+	var risk string
+	err = db.QueryRow(`SELECT risk_level FROM alerts ORDER BY id DESC LIMIT 1`).Scan(&risk)
+	if err == sql.ErrNoRows {
+		risk = "LOW"
+	}
+
+	sendPeriodicReport(weather, s, risk)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(`{"status":"ok","note":"Triggered periodic report — check Discord"}`))
+}
