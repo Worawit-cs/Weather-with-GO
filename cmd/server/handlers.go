@@ -45,6 +45,8 @@ func (a *App) latestAlertHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	// Default to Mae Sai to preserve the original endpoint behavior,
+	// but allow callers to inspect CNX with ?location=cnx.
 	location := r.URL.Query().Get("location")
 	if location == "" {
 		location = a.cfg.Maesai.Name
@@ -68,6 +70,7 @@ func (a *App) weatherFetchHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	// Manual fetch mirrors the cron path so both locations are refreshed the same way.
 	a.cronWeatherCycle(a.cfg.Maesai, a.notifier)
 	a.cronWeatherCycle(a.cfg.CNX, a.cnxNotifier)
 	w.Header().Set("Content-Type", "application/json")
@@ -82,6 +85,7 @@ func (a *App) weatherReportHandler(w http.ResponseWriter, r *http.Request) {
 	location := a.cfg.Maesai
 	switch r.URL.Query().Get("location") {
 	case a.cfg.CNX.Name:
+		// The read-only report endpoint can switch data source without changing payload shape.
 		location = a.cfg.CNX
 	}
 
@@ -112,6 +116,7 @@ func (a *App) testHighRiskHandler(w http.ResponseWriter, r *http.Request) {
 	location := a.cfg.Maesai
 	notifier := a.notifier
 	if r.URL.Query().Get("location") == a.cfg.CNX.Name {
+		// Test endpoints follow the same per-location routing rules as the real cron/bot flow.
 		location = a.cfg.CNX
 		notifier = a.cnxNotifier
 	}

@@ -16,6 +16,7 @@ func (a *App) onMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) 
 
 	switch strings.ToLower(m.Content) {
 	case "/weather", "/maesai":
+		// Keep /weather as a backward-compatible alias for Mae Sai.
 		report, err := weather.FetchReport(a.cfg.Maesai.Lat, a.cfg.Maesai.Lon)
 		if err != nil {
 			s.ChannelMessageSend(m.ChannelID, "❌ Cannot fetch Mae Sai weather report.")
@@ -29,6 +30,7 @@ func (a *App) onMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) 
 			if err != nil {
 				log.Println("/weather: AQI fetch failed:", err)
 			} else {
+				// User-triggered commands reply through the bot in the same channel, not through the webhook.
 				a.notifier.AQIReportToChannel(m.ChannelID, aqi)
 			}
 		}
@@ -56,6 +58,7 @@ func (a *App) onMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) 
 			if err != nil {
 				log.Println("/cnx: AQI fetch failed:", err)
 			} else {
+				// Persist CNX on-demand data too, so manual calls still update the latest location state.
 				c := aqi.CurrentAQI
 				if err := a.store.InsertAQI(c.City, c.AQI, weather.AQICodeText(c.AQI), c.PM25, c.PM10); err != nil {
 					log.Println("/cnx: insert AQI failed:", err)

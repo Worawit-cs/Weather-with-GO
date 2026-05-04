@@ -52,6 +52,7 @@ func (n *Notifier) SendToChannel(p Payload) error {
 }
 
 func (n *Notifier) SendToChannelID(channelID string, p Payload) error {
+	// This path is used for request/response bot behavior where the destination channel is decided at runtime.
 	if n.session == nil || channelID == "" {
 		return nil
 	}
@@ -100,6 +101,7 @@ func (n *Notifier) AQIReport(aqi *weather.AQIResponse) {
 	log.Println("AQI report sent to Discord")
 }
 
+// Webhook-only helpers keep scheduled jobs from also echoing into bot channels.
 func (n *Notifier) PeriodicReportWebhookOnly(report *weather.WeatherReport, risk string) {
 	if err := n.Send(PeriodicReportPayload(report, risk)); err != nil {
 		log.Printf("Discord webhook error: %v", err)
@@ -116,6 +118,7 @@ func (n *Notifier) AQIReportWebhookOnly(aqi *weather.AQIResponse) {
 	log.Println("AQI report sent to Discord webhook")
 }
 
+// Channel-only helpers keep user-issued commands inside the same Discord conversation.
 func (n *Notifier) PeriodicReportToChannel(channelID string, report *weather.WeatherReport, risk string) {
 	if err := n.SendToChannelID(channelID, PeriodicReportPayload(report, risk)); err != nil {
 		log.Printf("Bot channel send error: %v", err)

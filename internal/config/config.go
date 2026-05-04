@@ -28,12 +28,14 @@ type Config struct {
 	AQIToken         string
 	Maesai           Location
 	CNX              Location
-	Debug            bool // true unless ENV=production
+	// Debug only controls webhook routing; bot replies still use the active Discord session.
+	Debug bool
 }
 
 func Load() (Config, error) {
 	_ = godotenv.Load() // silently ignore missing .env; systemd sets vars directly
 
+	// Only explicit debug/development values enable the test webhook path.
 	envMode := strings.ToLower(envTrim("ENV"))
 	cfg := Config{
 		Port:             envOr("PORT", "3000"),
@@ -74,6 +76,7 @@ func envTrim(key string) string {
 }
 
 func normalizeAQICode(v string) string {
+	// Accept either "5775" or "@5775" in .env and normalize to the WAQI station format.
 	v = strings.TrimSpace(v)
 	if v == "" {
 		return ""

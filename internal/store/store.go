@@ -74,6 +74,7 @@ func New(dbPath string) (*Store, error) {
 	db.Exec(`ALTER TABLE weather_data ADD COLUMN weather_code INTEGER DEFAULT 0`)
 	db.Exec(`ALTER TABLE weather_data ADD COLUMN weather_code_text TEXT DEFAULT ''`)
 	db.Exec(`ALTER TABLE weather_data ADD COLUMN location TEXT DEFAULT 'maesai'`)
+	// alerts.location was added later so old databases can keep working without a destructive migration.
 	db.Exec(`ALTER TABLE alerts ADD COLUMN location TEXT DEFAULT 'maesai'`)
 
 	log.Println("Database initialized")
@@ -128,6 +129,7 @@ func (s *Store) LatestAlertLevel(location string) (string, error) {
 	return level, err
 }
 
+// LatestAlert powers both the API and debugging tools, so it returns the location field too.
 func (s *Store) LatestAlert(location string) (weather.Alert, error) {
 	var a weather.Alert
 	err := s.db.QueryRow(

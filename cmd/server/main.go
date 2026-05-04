@@ -12,6 +12,7 @@ import (
 )
 
 type App struct {
+	// Mae Sai and CNX share the same store/config, but each location gets its own notifier target.
 	cfg         config.Config
 	store       *store.Store
 	notifier    *notify.Notifier
@@ -36,6 +37,8 @@ func main() {
 
 	app := &App{cfg: cfg, store: st}
 
+	// In debug mode both webhook senders are redirected to the shared test webhook,
+	// while bot replies still go to the requested Discord channel at runtime.
 	maesaiWebhook := cfg.WebhookMaesaiURL
 	if cfg.Debug {
 		maesaiWebhook = cfg.WebhookTestURL

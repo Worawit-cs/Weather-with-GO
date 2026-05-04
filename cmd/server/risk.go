@@ -10,6 +10,7 @@ import (
 )
 
 func (a *App) checkWeatherRisk(location config.Location, notifier *notify.Notifier) {
+	// Risk state is tracked per location so Mae Sai and CNX do not overwrite each other's alerts.
 	w, err := a.store.LatestWeather(location.Name)
 	if err == sql.ErrNoRows {
 		log.Printf("No weather data yet for %s, skipping risk check", location.Name)
@@ -59,6 +60,7 @@ func (a *App) checkWeatherRisk(location config.Location, notifier *notify.Notifi
 }
 
 func (a *App) checkAQIRisk(location config.Location, notifier *notify.Notifier) {
+	// AQI alerts reuse the notifier for the same location so the message lands in the correct destination.
 	if location.AQICode == "" || a.cfg.AQIToken == "" {
 		return
 	}

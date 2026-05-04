@@ -62,7 +62,8 @@ type Alert struct {
 	RiskLevel string `json:"risk_level"`
 	Message   string `json:"message"`
 	Timestamp string `json:"timestamp"`
-	Location  string `json:"location,omitempty"`
+	// Location is optional in JSON so old callers still decode cleanly.
+	Location string `json:"location,omitempty"`
 }
 
 // AQIResponse holds the parsed WAQI API response.

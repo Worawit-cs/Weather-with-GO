@@ -13,6 +13,7 @@ func (a *App) startCron() {
 	// Goroutine 1: fetch weather + check risk every 10 minutes
 	go func() {
 		for {
+			// Run the same automation flow for both monitored locations.
 			a.cronWeatherCycle(a.cfg.Maesai, a.notifier)
 			a.cronWeatherCycle(a.cfg.CNX, a.cnxNotifier)
 			time.Sleep(10 * time.Minute)
@@ -22,6 +23,7 @@ func (a *App) startCron() {
 	// Goroutine 2: send periodic Discord report every 3 hours
 	go func() {
 		for {
+			// Scheduled reports are webhook-only; bot replies are reserved for user-triggered commands.
 			a.cronReportCycle(a.cfg.Maesai, a.notifier)
 			a.cronReportCycle(a.cfg.CNX, a.cnxNotifier)
 			time.Sleep(3 * time.Hour)
@@ -37,6 +39,8 @@ func (a *App) cronWeatherCycle(location config.Location, notifier *notify.Notifi
 		return
 	}
 
+	// The location struct carries both coordinates and the DB identity key,
+	// so the caller does not need to pass magic strings around.
 	report, err := weather.FetchReport(location.Lat, location.Lon)
 	if err != nil {
 		log.Printf("fetchWeather error for %s: %v", location.Name, err)
@@ -70,6 +74,7 @@ func (a *App) cronReportCycle(location config.Location, notifier *notify.Notifie
 
 	risk, _ := a.store.LatestAlertLevel(location.Name)
 
+	// AQI is fetched separately because WAQI uses a station code rather than lat/lon.
 	if location.AQICode != "" && a.cfg.AQIToken != "" {
 		aqi, err := weather.FetchAQIReport(location.AQICode, a.cfg.AQIToken)
 		if err != nil {
