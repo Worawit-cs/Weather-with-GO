@@ -1,480 +1,225 @@
 # Home Weather & Flood Alert System
 
-A lightweight IoT backend written in Go that monitors rain and flood risk for your home,
-and sends real-time alerts to a Discord channel.
+A Go backend that monitors weather and AQI for two locations, stores readings in SQLite, and sends Discord updates through both bot commands and scheduled webhooks.
 
----
+## Current Behavior
 
-## About This Project
-
-This system was built to solve a specific problem: the west side of my house is vulnerable
-to heavy rain and flooding when storms come from the west. I needed a way to get an early
-warning — before the rain actually arrives — so I have time to prepare.
-
-Instead of building a web dashboard that I would have to remember to open, I chose Discord
-as the notification channel. Discord works on my phone, keeps a history of all past alerts,
-and sends a push notification automatically. No browser needed.
-
-The system runs on an old machine (Intel Core 2 Duo) and is designed to be as lightweight
-as possible: a single compiled Go binary, a SQLite file for storage, and no Docker or
-external services required.
-
----
-
-## What It Does
-
-- Fetches real weather data (rain probability, wind direction, temperature) from the
-  Open-Meteo API every 10 minutes — free, no API key required.
-- Receives humidity, temperature, and water-detection readings from an ESP32 sensor
-  on the west side of the house.
-- Runs a risk engine that classifies the current situation as LOW, MEDIUM, or HIGH.
-- Sends three types of Discord notifications:
-  - **Urgent alert** — fires immediately when risk rises to HIGH, mentions @everyone.
-  - **All Clear** — fires when risk drops back to LOW after an elevated state.
-  - **Periodic report** — sends a weather summary every 3 hours regardless of risk level.
-- Works without an ESP32 connected — falls back to outdoor weather humidity until a
-  sensor is available.
-
----
-
-## Risk Logic
-
-```
-West wind = wind direction between 225° and 315°
-
-HIGH   if  rain_probability > 70%
-        AND wind is coming from the west
-        AND sensor humidity > 80%
-
-MEDIUM if  rain_probability > 50%
-        AND sensor humidity > 70%
-
-LOW    otherwise
-```
-
-Notifications are only sent when the risk level **changes**, so you will never receive
-duplicate alerts for the same condition.
-
----
-
-## How It Works
-
-```
-Open-Meteo API  ──(every 10 min)──>  Go Backend  ──>  SQLite (data.db)
-ESP32 Sensor    ──(POST /api/sensor)──>   |
-                                          |
-                                     Risk Engine
-                                          |
-                              ┌───────────┴───────────┐
-                              v                       v
-                       Discord Alert            ESP32 Buzzer
-                    (urgent / all clear     (polls GET /api/alert/latest)
-                    / 3-hour report)
-```
-
----
-
-## Prerequisites
-
-| Tool | Version | Notes |
-|------|---------|-------|
-| Go   | 1.21+   | Install from https://go.dev/dl |
-| gcc  | any     | Required to compile the SQLite driver |
-
-**Install gcc on Ubuntu/Debian:**
-```bash
-sudo apt install build-essential
-```
-
-**Install Go on Ubuntu/Debian:**
-```bash
-sudo apt install golang-go
-```
-
----
+- Mae Sai and CNX both run automatic weather checks every 10 minutes.
+- Mae Sai and CNX both send automatic webhook reports every 3 hours.
+- Mae Sai and CNX both run AQI checks and urgent AQI alerts.
+- Mae Sai and CNX both run weather risk classification with independent alert history.
+- `/maesai` and `/cnx` reply through the Discord bot in the channel where the user typed the command.
+- `/weather` is kept as an alias for Mae Sai.
 
 ## Project Structure
 
-```
-wheather-GO/
-├── main.go                  # Entry point
-├── db.go                    # Database init (SQLite + WAL mode)
-├── models.go                # Struct definitions
-├── handlers.go              # HTTP handlers
-├── risk.go                  # Risk classification engine
-├── cron.go                  # Background goroutines (weather check, periodic report)
-├── weather_api.go           # Open-Meteo integration
-├── notify.go                # Discord webhook notifications
-├── simulate.sh              # IoT simulator script (no ESP32 needed)
-├── .env                     # Your config (never commit this)
-├── .env.example             # Config template (safe to commit)
-├── .gitignore
-├── go.mod / go.sum
-├── weather-server.service   # systemd unit for the server machine
-└── deploy.sh                # One-command deploy script
+```text
+weather-GO/
+├── cmd/server/              # App wiring, cron, handlers, Discord bot
+├── internal/config/         # Env loading and location config
+├── internal/store/          # SQLite schema and queries
+├── internal/weather/        # Open-Meteo, WAQI, risk logic, models
+├── internal/notify/         # Discord payload builders and senders
+├── .env.example             # Config template
+├── deploy.sh                # Pull, rebuild, restart helper
+├── simulate.sh              # Local sensor simulator
+├── CLAUDE.md                # Maintainer notes for this repo
+├── planing.md               # High-level project notes
+└── weather-server.service   # Example systemd service
 ```
 
----
+## Prerequisites
+
+- Go 1.21 or newer
+- `gcc` / build tools for `github.com/mattn/go-sqlite3`
+- `curl` for `simulate.sh`
+
+Ubuntu / Debian:
+
+```bash
+sudo apt update
+sudo apt install -y golang-go build-essential curl
+```
 
 ## Setup
 
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/wheather-GO.git
-cd wheather-GO
+git clone https://github.com/YOUR_USERNAME/weather-GO.git
+cd weather-GO
 ```
 
-### 2. Install Go dependencies
+### 2. Download dependencies
 
 ```bash
 go mod download
 ```
 
-### 3. Create a Discord Webhook
-
-1. Open Discord and go to the channel where you want alerts.
-2. Click the gear icon (Edit Channel) > Integrations > Webhooks.
-3. Click **New Webhook**, give it a name (e.g. "Weather Alert"), and copy the URL.
-
-### 4. Find your coordinates
-
-Go to [maps.google.com](https://maps.google.com), right-click your home location, and
-click the coordinates at the top of the menu to copy them.
-
-### 5. Create your .env file
+### 3. Create `.env`
 
 ```bash
 cp .env.example .env
 ```
 
-Open `.env` and fill in your values:
+Example:
 
 ```env
 PORT=3000
-DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/YOUR_ID/YOUR_TOKEN
-AQI_TOKEN = "your Token"
-CITY_CODE="your city code" (optiional)
-LAT=13.7563
-LON=100.5018
+ENV=production
+DB_PATH=./data.db
+WEATHER_BOT_KEY=your_discord_bot_token
+
+MAESAI_CHANNEL=your_maesai_channel_id
+MAESAI_LAT=19.922944
+MAESAI_LON=99.867034
+MAESAI_CODE=@1832
+DISCORD_WEBHOOK_MAESAI_URL=https://discord.com/api/webhooks/...
+
+CNX_CHANNEL=your_cnx_channel_id
+CNX_LAT=18.7883
+CNX_LON=98.9853
+CNX_CODE=@5775
+DISCORD_WEBHOOK_CNX_URL=https://discord.com/api/webhooks/...
+
+DISCORD_WEBHOOK_TEST_URL=https://discord.com/api/webhooks/...
+AQI_TOKEN=your_waqi_token
 ```
 
-### 6. Build the binary
+Notes:
+
+- `ENV=production` uses the real location webhooks.
+- `ENV=debug` or `ENV=development` sends webhook traffic to `DISCORD_WEBHOOK_TEST_URL`.
+- AQI station codes may be written as `5775` or `@5775`; the app normalizes numeric values automatically.
+
+### 4. Run the server
 
 ```bash
-go build -o server .
+go run ./cmd/server
 ```
 
-### 7. Run
+Or build a binary:
 
 ```bash
+go build -o server ./cmd/server
 ./server
 ```
 
-Or run directly without building:
+## Discord Usage
+
+- `/maesai` or `/weather`: send Mae Sai AQI + weather report back through the bot to the current channel
+- `/cnx`: send CNX AQI + weather report back through the bot to the current channel
+
+Scheduled behavior:
+
+- automatic weather cycles every 10 minutes for both locations
+- automatic webhook reports every 3 hours for both locations
+- urgent risk and AQI alerts for both locations
+
+## API
+
+- `GET /health`
+- `GET /api/alert/latest`
+- `GET /api/alert/latest?location=cnx`
+- `POST /api/weather/fetch`
+- `GET /api/weather/report`
+- `GET /api/weather/report?location=cnx`
+- `POST /api/test/high-risk`
+- `POST /api/test/high-risk?location=cnx`
+- `POST /api/test/peroid`
+- `POST /api/test/peroid?location=cnx`
+- `POST /api/test/urgent-aqi`
+- `POST /api/test/urgent-aqi?location=cnx`
+
+Quick checks:
 
 ```bash
-go run .
+curl http://localhost:3000/health
+curl http://localhost:3000/api/alert/latest
+curl http://localhost:3000/api/alert/latest?location=cnx
+curl http://localhost:3000/api/weather/report
+curl http://localhost:3000/api/weather/report?location=cnx
+curl -X POST http://localhost:3000/api/weather/fetch
 ```
 
----
+## Testing Without ESP32
 
-## Testing Without an ESP32
+Start the server:
 
-You do not need any hardware to test the system. The simulator script (`simulate.sh`)
-sends fake sensor readings to the backend, exactly as an ESP32 would.
-
-**Start the server in one terminal:**
 ```bash
-go run .
+go run ./cmd/server
 ```
 
-**Run the simulator in another terminal:**
+Run the simulator in another terminal:
+
 ```bash
-# Random humidity readings every 30 seconds
 ./simulate.sh
-
-# Force HIGH risk conditions (triggers urgent Discord alert)
 ./simulate.sh high
-
-# Force MEDIUM risk conditions
 ./simulate.sh medium
-
-# Force LOW risk conditions (triggers All Clear if previous state was elevated)
 ./simulate.sh low
 ```
 
-**Change the send interval (default is 30 seconds):**
+Useful options:
+
 ```bash
 INTERVAL=10 ./simulate.sh high
-```
-
-**Point the simulator at a different server:**
-```bash
 SERVER_URL=http://192.168.1.50:3000 ./simulate.sh
 ```
 
-**Test Discord notifications directly without the simulator:**
-```bash
-# Inject fake HIGH risk data and fire urgent Discord alert
-curl -X POST http://localhost:3000/api/test/high-risk
+Manual sensor post:
 
-# Send a low-humidity reading to trigger All Clear
+```bash
 curl -X POST http://localhost:3000/api/sensor \
   -H "Content-Type: application/json" \
-  -d '{"location":"west","humidity":45,"temperature":25,"water_detected":0}'
+  -d '{"location":"west","humidity":85,"temperature":28,"water_detected":0}'
 ```
 
----
+## Deployment
 
-## Deployment on the Server Machine
-
-### One-time setup
+One-time setup on the server:
 
 ```bash
-# 1. Clone the repo
-git clone https://github.com/YOUR_USERNAME/wheather-GO.git
-cd wheather-GO
+git clone https://github.com/YOUR_USERNAME/weather-GO.git
+cd weather-GO
 
-# 2. Create .env with your real values
 cp .env.example .env
 nano .env
 
-# 3. Build the binary
-go build -o server .
-
-# 4. Edit the service file — replace 'user' with your actual Linux username
+go build -o server ./cmd/server
 nano weather-server.service
 
-# 5. Install and enable the systemd service
 sudo cp weather-server.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable weather-server
 sudo systemctl start weather-server
 ```
 
-### Deploy an update
+Before enabling the service, update `weather-server.service` paths for your machine.
 
-After pushing new code to GitHub, run this on the server:
+Deploy updates:
 
 ```bash
 ./deploy.sh
 ```
 
-This pulls the latest code, rebuilds the binary, and restarts the service automatically.
-
----
-
-## API Reference
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET`  | `/health` | Liveness check. Returns `{"status":"ok"}` |
-| `POST` | `/api/sensor` | Receive sensor data from ESP32 or simulator |
-| `GET`  | `/api/alert/latest` | Get the latest risk level (polled by ESP32 for buzzer) |
-| `POST` | `/api/weather/fetch` | Manually trigger a weather fetch from Open-Meteo |
-| `POST` | `/api/test/high-risk` | Inject fake HIGH risk data to test Discord alerts |
-
-**POST /api/sensor — request body:**
-```json
-{
-  "location": "west",
-  "humidity": 85,
-  "temperature": 28,
-  "water_detected": 0
-}
-```
-
-**GET /api/alert/latest — response:**
-```json
-{
-  "risk_level": "HIGH",
-  "message": "Risk level changed to HIGH",
-  "timestamp": "2026-04-29T10:00:00Z"
-}
-```
-
----
-
-## Essential Commands
-
-### Development
+## Useful Commands
 
 ```bash
-# Run in development mode (auto-reads .env)
-go run .
-
-# Build a binary
-go build -o server .
-
-# Run the compiled binary
-./server
-
-# Download dependencies
-go mod download
-
-# Tidy up unused dependencies
-go mod tidy
-```
-
-### Testing
-
-```bash
-# Check server is alive
-curl http://localhost:3000/health
-
-# Push a sensor reading
-curl -X POST http://localhost:3000/api/sensor \
-  -H "Content-Type: application/json" \
-  -d '{"location":"west","humidity":85,"temperature":28,"water_detected":0}'
-
-# Get latest alert
-curl http://localhost:3000/api/alert/latest
-
-# Manually fetch weather from Open-Meteo
-curl -X POST http://localhost:3000/api/weather/fetch
-
-# Fire a test HIGH alert to Discord
-curl -X POST http://localhost:3000/api/test/high-risk
-
-# Run the IoT simulator
+go run ./cmd/server
+go build -o server ./cmd/server
+go test ./...
 ./simulate.sh high
-```
-
-### Systemd Service (Server Machine)
-
-```bash
-# Start the service
-sudo systemctl start weather-server
-
-# Stop the service
-sudo systemctl stop weather-server
-
-# Restart after an update
-sudo systemctl restart weather-server
-
-# Check if it is running
 sudo systemctl status weather-server
-
-# Enable auto-start on boot
-sudo systemctl enable weather-server
-
-# Disable auto-start on boot
-sudo systemctl disable weather-server
-```
-
-### Logs
-
-```bash
-# Watch live server logs
 journalctl -u weather-server -f
-
-# Show last 100 lines of logs
-journalctl -u weather-server -n 100
-
-# Show logs since a specific time
-journalctl -u weather-server --since "2026-04-29 00:00:00"
-```
-
-### Database (SQLite)
-
-```bash
-# Open the database interactively
 sqlite3 data.db
-
-# Inside sqlite3 — view latest weather readings
-SELECT * FROM weather_data ORDER BY id DESC LIMIT 10;
-
-# Inside sqlite3 — view latest sensor readings
-SELECT * FROM sensor_data ORDER BY id DESC LIMIT 10;
-
-# Inside sqlite3 — view all alerts
-SELECT * FROM alerts ORDER BY id DESC LIMIT 20;
-
-# Inside sqlite3 — manually clear all alerts (useful for testing)
-DELETE FROM alerts;
-
-# Exit sqlite3
-.quit
 ```
 
-### Git & Deploy
+Example SQLite queries:
 
-```bash
-# Push changes to GitHub (from dev machine)
-git add .
-git commit -m "your message"
-git push
-
-# Deploy to server (run this on the server machine)
-./deploy.sh
-```
-
----
-
-## Troubleshooting
-
-**Server will not start — "port already in use"**
-```bash
-# Find what is using port 3000
-sudo lsof -i :3000
-# Kill the process (replace PID with the number shown)
-kill PID
-```
-
-**Server will not start — SQLite compilation error**
-```bash
-# Install gcc (required by the SQLite Go driver)
-sudo apt install build-essential
-```
-
-**No Discord messages arriving**
-```bash
-# Confirm your webhook URL is set
-grep DISCORD_WEBHOOK_URL .env
-
-# Test the webhook directly with curl
-curl -X POST "$DISCORD_WEBHOOK_URL" \
-  -H "Content-Type: application/json" \
-  -d '{"content":"test message"}'
-```
-
-**Weather data is not updating**
-```bash
-# Check that LAT and LON are set in .env
-grep -E "LAT|LON" .env
-
-# Manually trigger a fetch and watch the log
-curl -X POST http://localhost:3000/api/weather/fetch
-```
-
-**Risk never reaches HIGH even with the simulator**
-
-The HIGH threshold requires rain probability > 70% AND west wind AND humidity > 80%.
-The weather data fetched from Open-Meteo may show low rain probability if the real
-weather is clear. Use the dedicated test endpoint to bypass this:
-
-```bash
-curl -X POST http://localhost:3000/api/test/high-risk
-```
-
-**systemd service keeps restarting**
-```bash
-# Check the error in the service log
-journalctl -u weather-server -n 50
-
-# Common cause: wrong WorkingDirectory or binary path in the .service file
-# Edit the service file, update paths, then reload
-sudo nano /etc/systemd/system/weather-server.service
-sudo systemctl daemon-reload
-sudo systemctl restart weather-server
-```
-
-**data.db file is growing too large**
-
-The database stores every sensor and weather reading indefinitely. To clean up old data:
-```bash
-sqlite3 data.db "DELETE FROM weather_data WHERE timestamp < datetime('now', '-30 days');"
-sqlite3 data.db "DELETE FROM sensor_data WHERE timestamp < datetime('-30 days');"
-sqlite3 data.db "VACUUM;"
+```sql
+SELECT * FROM weather_data WHERE location = 'maesai' ORDER BY id DESC LIMIT 10;
+SELECT * FROM weather_data WHERE location = 'cnx' ORDER BY id DESC LIMIT 10;
+SELECT * FROM alerts WHERE location = 'maesai' ORDER BY id DESC LIMIT 20;
+SELECT * FROM alerts WHERE location = 'cnx' ORDER BY id DESC LIMIT 20;
+SELECT * FROM aqi_data ORDER BY id DESC LIMIT 20;
 ```

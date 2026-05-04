@@ -1,10 +1,13 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Simulates an ESP32 sensor sending data to the backend.
+# Weather and AQI automation now runs for both Mae Sai and CNX independently.
 # Usage:
 #   ./simulate.sh              — random humidity (60–90%), runs forever
 #   ./simulate.sh high         — force HIGH risk (humidity 90%)
 #   ./simulate.sh medium       — force MEDIUM risk (humidity 75%)
 #   ./simulate.sh low          — force LOW risk (humidity 50%)
+
+set -u
 
 SERVER="${SERVER_URL:-http://localhost:3000}"
 INTERVAL="${INTERVAL:-30}"   # seconds between readings
@@ -13,6 +16,11 @@ MODE="${1:-random}"
 echo "Simulator started → $SERVER  (mode: $MODE, interval: ${INTERVAL}s)"
 echo "Press Ctrl+C to stop."
 echo ""
+
+if ! command -v curl >/dev/null 2>&1; then
+  echo "curl is required to run simulate.sh"
+  exit 1
+fi
 
 while true; do
   case "$MODE" in

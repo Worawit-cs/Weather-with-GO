@@ -1,78 +1,92 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Repository notes for agents and maintainers.
 
 ## Commands
 
 ```bash
-# Run in development (auto-loads .env)
-go run .
+# Run locally
+go run ./cmd/server
 
 # Build binary
-go build -o wheather-go .
+go build -o server ./cmd/server
 
-# Simulate IoT sensor data without hardware
+# Validate code
+go test ./...
+
+# Simulate sensor traffic
 ./simulate.sh [high|medium|low]
 
-# Deploy to production (pull, rebuild, restart systemd service)
+# Deploy on the server machine
 ./deploy.sh
 ```
 
-**No Makefile or test suite exists.** Validate changes manually via HTTP endpoints:
-```bash
-curl http://localhost:3000/health
-curl http://localhost:3000/api/weather/report
-curl -X POST http://localhost:3000/api/test/high-risk
-curl -X POST http://localhost:3000/api/test/peroid
-```
+## Runtime Summary
 
-The binary requires `gcc` at build time because `github.com/mattn/go-sqlite3` uses cgo.
+- Two monitored locations: `maesai` and `cnx`
+- Both locations run:
+  - weather fetch every 10 minutes
+  - AQI check during the weather cycle
+  - periodic webhook report every 3 hours
+  - independent weather-risk transitions and alert history
+- Bot commands:
+  - `/weather` and `/maesai` for Mae Sai
+  - `/cnx` for Chiang Mai
+- Bot commands reply only in the channel where the user asked
+- Scheduled reports go to the configured webhooks
 
-## Architecture
+## Important Code Paths
 
-Single-package (`main`) flat layout — all `.go` files are in the root directory.
+| Path | Purpose |
+|------|---------|
+| `cmd/server/main.go` | App wiring, notifier setup, Discord session |
+| `cmd/server/cron.go` | Automatic weather and periodic report loops for both locations |
+| `cmd/server/risk.go` | Per-location risk and AQI alert checks |
+| `cmd/server/bot.go` | Discord bot commands |
+| `cmd/server/handlers.go` | HTTP endpoints and test triggers |
+| `internal/config/config.go` | `.env` loading and location normalization |
+| `internal/store/store.go` | SQLite schema, migrations, location-aware queries |
+| `internal/notify/discord.go` | Webhook-only, bot-only, and broadcast send paths |
+| `internal/weather/` | API clients, models, and classification logic |
 
-**Data flow:**
-1. Background goroutines in `cron.go` run every 10 min (weather check) and every 3 hr (periodic report).
-2. Each cycle fetches weather from Open-Meteo (`weather_api.go`) and AQI from WAQI API.
-3. `risk.go` classifies the result as HIGH / MEDIUM / LOW based on rain probability and wind direction.
-4. `notify.go` sends Discord webhook alerts when risk level changes or on the 3-hour schedule.
-5. All data is persisted to SQLite (`data.db`, WAL mode) via helpers in `db.go`.
-6. ESP32 sensors POST to `/api/sensor`, but sensor-based risk conditions are currently commented out while awaiting hardware reconnection.
+## Config Notes
 
-**File responsibilities:**
+Expected env vars:
 
-| File | Role |
-|------|------|
-| `main.go` | Startup: load `.env`, init DB, start cron goroutines, register HTTP routes |
-| `db.go` | SQLite init, schema creation, WAL mode, ALTER TABLE migrations |
-| `models.go` | All struct definitions (SensorData, WeatherData, WeatherReport, Alert, AQI) |
-| `handlers.go` | HTTP handlers for all routes |
-| `risk.go` | Risk classification engine |
-| `cron.go` | Two background goroutines (weather check + periodic report) |
-| `weather_api.go` | Open-Meteo and WAQI API calls, WMO code-to-text mapping |
-| `notify.go` | Discord webhook payload construction and delivery |
+- `PORT`
+- `ENV`
+- `DB_PATH`
+- `WEATHER_BOT_KEY`
+- `AQI_TOKEN`
+- `MAESAI_CHANNEL`
+- `MAESAI_LAT`
+- `MAESAI_LON`
+- `MAESAI_CODE`
+- `DISCORD_WEBHOOK_MAESAI_URL`
+- `CNX_CHANNEL`
+- `CNX_LAT`
+- `CNX_LON`
+- `CNX_CODE`
+- `DISCORD_WEBHOOK_CNX_URL`
+- `DISCORD_WEBHOOK_TEST_URL`
 
-## Configuration
+Behavior:
 
-Requires a `.env` file in the project root (see `.env.example`):
+- `ENV=production` uses real location webhooks
+- `ENV=debug` or `ENV=development` routes webhook sends to the test webhook
+- AQI codes like `5775` are normalized to `@5775`
 
-| Variable | Purpose |
-|----------|---------|
-| `PORT` | HTTP listen port (default 3000) |
-| `DISCORD_WEBHOOK_URL` | Discord webhook for alerts |
-| `AQI_TOKEN` | WAQI API token |
-| `MAESAI_CODE` | WAQI station code for Mae Sai |
-| `LAT` / `LON` | Home coordinates for Open-Meteo |
+## API Notes
 
-## Risk Logic
+- `GET /api/alert/latest` defaults to Mae Sai
+- `GET /api/alert/latest?location=cnx` returns CNX alert state
+- `GET /api/weather/report?location=cnx` fetches CNX weather report
+- test endpoints accept `?location=cnx`
 
-**HIGH**: `rain_probability > 70%` AND wind direction 225°–315° (west wind inflow)  
-**MEDIUM**: `rain_probability > 50%`  
-**LOW**: everything else
+## Deployment
 
-Risk changes trigger immediate Discord notifications; the 3-hour cron always sends a summary regardless of level.
+`deploy.sh` performs:
 
-## Production Deployment
-
-The app runs as a systemd service. The unit file is `weather-server.service`. After making changes, `./deploy.sh` handles pull + rebuild + service restart.
+1. `git pull --ff-only`
+2. `go build -o server ./cmd/server`
+3. `sudo systemctl restart weather-server`
